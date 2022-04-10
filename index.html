@@ -1,0 +1,752 @@
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      Squid Game's "Reg light, green light" with body tracking using
+      TensorFlow.js - by Charlie Gerard
+    </title>
+    <meta
+      property="og:description"
+      content="Play a prototype of 'Red light, green light' using body movement detection"
+    />
+    <meta
+      name="description"
+      content="Play a prototype of 'Red light, green light' using body movement detection"
+    />
+    <meta
+      property="og:image"
+      content="https://res.cloudinary.com/devdevcharlie/image/upload/v1636244711/Screenshot_2021-11-06_at_17.23.27_hmpg3l.png"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.co/gsap@3/dist/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.133.1/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.133.1/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  </head>
+  <style>
+    @font-face {
+  font-family: "Digital";
+  src: url("https://assets.codepen.io/127738/digital-7+%28mono%29.ttf")
+    format("truetype");
+}
+body {
+  margin: 0;
+}
+
+.timer {
+  font-family: Digital, monospace;
+  font-size: min(max(14px, 7vw), 46px);
+  color: #d7213c;
+  border: 5px outset #8b8b8b;
+  background: black;
+  text-align: center;
+  padding: 0 20px;
+  position: absolute;
+  bottom: 1.5vw;
+  left: 1.5vw;
+}
+
+.container {
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(#58abc2 50%, #d7327a 50%);
+  filter: brightness(0.7);
+  transition: 0.4s ease-out;
+}
+
+.container .is-playing {
+  filter: brightness(1);
+}
+
+.info {
+  font-size: 30px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  padding: 10px;
+  background: white;
+  z-index: 19;
+}
+
+.game {
+  background: url(https://assets.codepen.io/127738/Squid_Game_Doll_bg.jpg);
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+  font-size: 0;
+  border-radius: 10px;
+}
+
+.ui {
+  position: absolute;
+  background: black;
+  max-width: 620px;
+  z-index: 50;
+  text-align: center;
+  font-family: "Quicksand", sans-serif;
+  font-weight: 400;
+  border-radius: 20px;
+  transition: 0.3s ease-out;
+  color: white;
+  box-shadow: 0 0 20px 2px #00000059;
+  padding: 20px 60px;
+  max-height: 90vh;
+  width: 90%;
+  top: 50%;
+  left: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.8);
+}
+
+.ui svg {
+  position: absolute;
+  top: 10%;
+  left: 10%;
+  opacity: 0.15;
+  width: 80%;
+  height: 80%;
+  pointer-events: none;
+}
+
+.ui h1 {
+  font-size: 600;
+  font-size: 26px;
+}
+
+.ui p {
+  font-size: 18px;
+  margin-bottom: 0;
+  margin-top: 10px;
+}
+
+.is-visible,
+.is-howto-visible {
+  opacity: 1;
+  /* display: block; */
+}
+
+.is-hidden {
+  display: none;
+}
+
+.cta {
+  /* pointer-events: none; */
+  background: white;
+  border-radius: 0;
+  border: none;
+  font: inherit;
+  font-size: 24px;
+  font-weight: 600;
+  margin-top: 30px;
+  cursor: pointer;
+  padding: 10px 20px;
+}
+
+.cta .is-ready {
+  pointer-events: unset;
+}
+
+.win,
+.dead .cta::before {
+  content: none;
+}
+
+video {
+  position: absolute;
+  width: 100%;
+  height: auto;
+  opacity: 0;
+}
+
+p.countdown {
+  font-size: 40px;
+  color: white;
+}
+
+a:not> footer {
+  color: white;
+}
+
+footer {
+  position: absolute;
+  font-family: "Quicksand", sans-serif;
+  z-index: 10;
+  color: black;
+  text-align: center;
+  display: block;
+  width: 100%;
+  bottom: 1em;
+  font-size: 0.8em;
+  font-weight: 800;
+}
+
+footer a {
+  color: black;
+}
+
+  </style>
+  <body>
+
+    <main class="container">
+      <div class="game">
+        <video id="video"></video>
+        <div class="timer"><span class="time">00:15</span></div>
+      </div>
+    </main>
+
+    <div class="howto ui is-howto-visible">
+      <svg viewBox="0 0 191.99 60.82">
+        <path
+          d="M28.3,10.23A22.3,22.3,0,1,1,6,32.53a22.29,22.29,0,0,1,22.3-22.3m0-6a28.3,28.3,0,1,0,28.29,28.3A28.33,28.33,0,0,0,28.3,4.23Z"
+          fill="#fff"
+        />
+        <path
+          d="M186,10.57V54.49H142.06V10.57H186m6-6H136.06V60.49H192V4.57Z"
+          fill="#fff"
+        />
+        <path
+          d="M93.18,12l23.7,41.05H69.48l23.7-41m0-12L88,9,64.28,50.05l-5.19,9h68.19l-5.2-9L98.38,9l-5.2-9Z"
+          fill="#fff"
+        />
+      </svg>
+      <section class="intro is-visible">
+        <h1>Red Light, Green Light</h1>
+        <p>You have 15 seconds to reach the end of the field.</p>
+        <p>
+          When the doll is not watching, move forward until you reach your
+          computer.
+        </p>
+        <p>
+          If movement is detected when the doll is watching, you are eliminated.
+        </p>
+        <p>
+          When you're ready, click 'Start' and take steps back as far as you
+          can.
+        </p>
+
+        <p class="countdown"></p>
+        <button class="cta start">Loading...</button>
+      </section>
+
+      <section class="dead is-hidden">
+        <h1>You died!</h1>
+        <p>
+          Oops, it looks like you were moving too much or your reached the
+          timeout...
+        </p>
+        <button class="cta replay1 is-ready">Replay</button>
+      </section>
+
+      <section class="win is-hidden">
+        <h1>You won!</h1>
+        <p>Well done, you survived... for now.</p>
+        <button class="cta replay2 is-ready">Replay</button>
+      </section>
+    </div>
+
+    <footer>
+      Desgined by
+      <a href="#">Parth Brahmbhatt</a> 
+    </footer>
+    <script src="index.js"></script>
+    <script>
+      console.clear();
+let distance = 0;
+let isWatching = true;
+
+let gameStarted = false;
+let distanceSinceWatching = 0;
+let startTime = Date.now();
+const elIntro = document.querySelector(".intro");
+const elStart = document.querySelector(".start");
+const elHowTo = document.querySelector(".howto");
+const elGame = document.querySelector(".game");
+const elContainer = document.querySelector(".container");
+const elTime = document.querySelector(".timer .time");
+const elReplay1 = document.querySelector(".replay1");
+const elReplay2 = document.querySelector(".replay2");
+
+const elDead = document.querySelector(".dead");
+const elWin = document.querySelector(".win");
+const audioDoll = new Audio(
+  "https://assets.codepen.io/127738/squid-game-sound.mp3"
+);
+const audioDollDuration = 5.433469;
+const shotGun = new Audio("https://assets.codepen.io/127738/shotgun.mp3");
+shotGun.volume = 0.2;
+const sigh = new Audio("https://assets.codepen.io/127738/sigh.mp3");
+
+const MAX_MOVEMENT = 15;
+const GAME_TIME = 15;
+
+const countdownEl = document.querySelector(".countdown");
+let countdownInterval;
+let timerInterval;
+let playing = false;
+let playerHasWon;
+let gameFinished = false;
+let isDead = false;
+
+function init() {
+  let initialized = false;
+  if (initialized) return;
+
+  initialized = true;
+  playing = true;
+  updateWatching();
+}
+
+elStart.addEventListener("click", () => {
+  startCountdown();
+  const startCounter = setTimeout(() => {
+    init();
+    gameStarted = true;
+    initTimer();
+
+    elContainer.classList.add("is-playing");
+    elHowTo.classList.replace("is-howto-visible", "is-hidden");
+    elIntro.classList.replace("is-visible", "is-hidden");
+    clearTimeout(startCounter);
+    clearInterval(countdownInterval);
+  }, 5000);
+});
+
+const initTimer = (time) => {
+  let maxTime = time ? time : 14;
+
+  timerInterval = setInterval(() => {
+    // clear interval if the player has reached the end
+    if (playerHasWon) {
+      clearInterval(timerInterval);
+      return;
+    }
+    const formatSeconds = maxTime < 10 ? `0${maxTime}` : maxTime;
+    elTime.innerHTML = `00:${formatSeconds}`;
+    if (maxTime > 0) {
+      maxTime--;
+    } else {
+      // timeout
+      timeOut();
+      clearInterval(timerInterval);
+      return;
+    }
+  }, 1000);
+};
+
+const resetCounter = () => {
+  initTimer(GAME_TIME);
+};
+
+const startCountdown = () => {
+  let countdown = 5;
+  countdownEl.innerHTML = countdown;
+
+  countdownInterval = setInterval(() => {
+    countdown--;
+    countdownEl.innerHTML = countdown;
+  }, 1000);
+};
+
+function reachedEnd() {
+  if (!gameFinished) {
+    if (watchingTween) {
+      watchingTween.kill();
+    }
+
+    sigh.currentTime = 0;
+    sigh.play();
+    audioDoll.pause();
+
+    playing = false;
+    elHowTo.classList.replace("is-hidden", "is-howto-visible");
+    elWin.classList.replace("is-hidden", "is-visible");
+    elContainer.classList.remove("is-playing");
+    clearInterval(timerInterval);
+    gameFinished = true;
+  }
+}
+
+function timeOut() {
+  isDead = true;
+  if (watchingTween) {
+    watchingTween.kill();
+  }
+  audioDoll.pause();
+  shotGun.currentTime = 0;
+  shotGun.play();
+
+  playing = false;
+  elHowTo.classList.replace("is-hidden", "is-howto-visible");
+  elDead.classList.replace("is-hidden", "is-visible");
+  elContainer.classList.remove("is-playing");
+  clearInterval(timerInterval);
+}
+
+function dead() {
+  isDead = true;
+  if (watchingTween) {
+    watchingTween.kill();
+  }
+
+  audioDoll.pause();
+  shotGun.currentTime = 0;
+  shotGun.play();
+
+  playing = false;
+  elHowTo.classList.replace("is-hidden", "is-howto-visible");
+  elDead.classList.replace("is-hidden", "is-visible");
+  elContainer.classList.remove("is-playing");
+  clearInterval(timerInterval);
+}
+
+let watchingTween = null;
+function updateWatching() {
+  if (!playing) return;
+
+  isWatching = !isWatching;
+
+  let duration = Math.random() * 3.5 + 2.5;
+  if (isWatching) {
+    duration = Math.random() * 2 + 2;
+  }
+  if (!isWatching) {
+    audioDoll.currentTime = 0;
+    audioDoll.playbackRate = (audioDollDuration - 0.5) / duration;
+    audioDoll.play();
+  }
+  gsap.to(head.rotation, {
+    y: isWatching ? 0 : -Math.PI,
+    duration: 0.4,
+  });
+  watchingTween = gsap.to(
+    {},
+    {
+      duration,
+      onComplete: updateWatching,
+    }
+  );
+
+  if (!isWatching) {
+    distanceSinceWatching = 0;
+  }
+}
+
+/* THREEJS PART */
+const scene = new THREE.Scene();
+let sceneWidth = 0;
+if (window.innerWidth / window.innerHeight > 1.9) {
+  sceneWidth = window.innerWidth * 0.8;
+} else {
+  sceneWidth = window.innerWidth * 0.95;
+}
+let sceneHeight = sceneWidth / 2;
+const camera = new THREE.PerspectiveCamera(
+  75,
+  sceneWidth / sceneHeight,
+  0.1,
+  1000
+);
+
+const renderer = new THREE.WebGLRenderer({
+  alpha: true,
+  antialias: true,
+});
+renderer.setSize(sceneWidth, sceneHeight);
+
+elGame.appendChild(renderer.domElement);
+
+camera.position.y = 2.8;
+camera.position.z = 11;
+
+const light = new THREE.HemisphereLight(0xffffbb, 0x080820, 1);
+scene.add(light);
+const light2 = new THREE.AmbientLight(0x404040, 1.2);
+scene.add(light2);
+const spotLight = new THREE.SpotLight(0xffffff);
+spotLight.position.set(100, 1000, 100);
+scene.add(spotLight);
+
+let head = new THREE.Group();
+scene.add(head);
+const loader = new THREE.GLTFLoader();
+loader.load(
+  "https://assets.codepen.io/127738/Squid_game_doll.gltf",
+  (gltf) => {
+    scene.add(gltf.scene);
+    head.add(gltf.scene.children[0].children[0].children[0].children[1]);
+    head.add(gltf.scene.children[0].children[0].children[0].children[1]);
+    head.add(gltf.scene.children[0].children[0].children[0].children[2]);
+    head.children[0].position.y = -8;
+    head.children[1].position.y = -8;
+    head.children[2].position.y = -8;
+    head.children[0].position.z = 1;
+    head.children[1].position.z = 1;
+    head.children[2].position.z = 1;
+    head.children[0].scale.setScalar(1);
+    head.children[1].scale.setScalar(1);
+    head.children[2].scale.setScalar(1);
+    head.position.y = 8;
+    head.position.z = -1;
+
+    elStart.innerHTML = "Start";
+  },
+  (xhr) => {
+    console.log(`${(xhr.loaded / xhr.total) * 100}% loaded`);
+  },
+  (error) => {
+    console.log("An error happened", error);
+  }
+);
+
+renderer.setAnimationLoop(renderWebGL);
+
+function renderWebGL() {
+  renderer.render(scene, camera);
+}
+
+/* On Resize */
+function onWindowResize() {
+  if (window.innerWidth / window.innerHeight > 1.9) {
+    sceneWidth = window.innerWidth * 0.8;
+  } else {
+    sceneWidth = window.innerWidth * 0.95;
+  }
+  sceneHeight = sceneWidth / 2;
+  camera.aspect = sceneWidth / sceneHeight;
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(sceneWidth, sceneHeight);
+}
+window.addEventListener("resize", onWindowResize, false);
+onWindowResize();
+
+function replay() {
+  gameFinished = false;
+  isDead = false;
+  elContainer.classList.add("is-playing");
+  elHowTo.classList.replace("is-howto-visible", "is-hidden");
+  elDead.classList.replace("is-visible", "is-hidden");
+  elWin.classList.replace("is-visible", "is-hidden");
+  distance = 0;
+  isWatching = true;
+  distanceSinceWatching = 0;
+  playing = true;
+  updateWatching();
+  startTime = Date.now();
+  resetCounter();
+}
+elReplay1.addEventListener("click", () => {
+  replay();
+});
+elReplay2.addEventListener("click", () => {
+  replay();
+});
+
+// ------------
+// TFJS PART
+// ------------
+
+const videoWidth = window.innerWidth;
+const videoHeight = window.innerHeight;
+
+function isAndroid() {
+  return /Android/i.test(navigator.userAgent);
+}
+
+function isiOS() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function isMobile() {
+  return isAndroid() || isiOS();
+}
+
+async function setupCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error(
+      "Browser API navigator.mediaDevices.getUserMedia not available"
+    );
+  }
+
+  const video = document.getElementById("video");
+  video.width = videoWidth;
+  video.height = videoHeight;
+
+  const mobile = isMobile();
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: {
+      facingMode: "user",
+      width: mobile ? undefined : videoWidth,
+      height: mobile ? undefined : videoHeight,
+    },
+  });
+  video.srcObject = stream;
+
+  return new Promise((resolve) => {
+    video.onloadedmetadata = () => resolve(video);
+  });
+}
+
+const initDetection = async () => {
+  const detector = await poseDetection.createDetector(
+    poseDetection.SupportedModels.MoveNet
+  );
+
+  let video;
+
+  try {
+    video = await setupCamera();
+    video.play();
+    detectPosesRealTime(detector);
+  } catch (e) {
+    throw e;
+  }
+};
+
+const detectPosesRealTime = async (detector) => {
+  let previousPositions = [];
+
+  async function poseDetection() {
+    const poses = await detector.estimatePoses(video);
+
+    if (poses[0]) {
+      const leftShoulder = poses[0].keypoints.find(
+        (k) => k.name === "left_shoulder"
+      );
+      const rightShoulder = poses[0].keypoints.find(
+        (k) => k.name === "right_shoulder"
+      );
+      const leftElbow = poses[0].keypoints.find((k) => k.name === "left_elbow");
+      const rightElbow = poses[0].keypoints.find(
+        (k) => k.name === "right_elbow"
+      );
+      const leftHip = poses[0].keypoints.find((k) => k.name === "left_hip");
+      const rightHip = poses[0].keypoints.find((k) => k.name === "right_hip");
+      const leftKnee = poses[0].keypoints.find((k) => k.name === "left_knee");
+      const rightKnee = poses[0].keypoints.find((k) => k.name === "right_knee");
+      const leftAnkle = poses[0].keypoints.find((k) => k.name === "left_ankle");
+      const rightAnkle = poses[0].keypoints.find(
+        (k) => k.name === "right_ankle"
+      );
+
+      const currentPositions = [
+        {
+          x: leftShoulder.x,
+          y: leftShoulder.y,
+          movementThreshold: 15,
+        },
+        {
+          x: rightShoulder.x,
+          y: rightShoulder.y,
+          movementThreshold: 15,
+        },
+        {
+          x: leftElbow.x,
+          y: leftElbow.y,
+          movementThreshold: 20,
+        },
+        {
+          x: rightElbow.x,
+          y: rightElbow.y,
+          movementThreshold: 20,
+        },
+        {
+          x: leftHip.x,
+          y: leftHip.y,
+          movementThreshold: 100,
+        },
+        {
+          x: rightHip.x,
+          y: rightHip.y,
+          movementThreshold: 100,
+        },
+        {
+          x: leftKnee.x,
+          y: leftKnee.y,
+          movementThreshold: 100,
+        },
+        {
+          x: rightKnee.x,
+          y: rightKnee.y,
+          movementThreshold: 100,
+        },
+        {
+          x: leftAnkle.x,
+          y: leftAnkle.y,
+          movementThreshold: 100,
+        },
+        {
+          x: rightAnkle.x,
+          y: rightAnkle.y,
+          movementThreshold: 100,
+        },
+      ];
+
+      const hasReachedEnd = detectReachedEnd(rightShoulder, leftShoulder);
+
+      if (hasReachedEnd && !isDead) {
+        reachedEnd();
+        playerHasWon = true;
+      }
+
+      if (previousPositions[0] && gameStarted && isWatching) {
+        detectMovement(currentPositions, previousPositions);
+      }
+
+      previousPositions = currentPositions;
+    }
+
+    requestAnimationFrame(poseDetection);
+  }
+
+  poseDetection();
+};
+
+const detectReachedEnd = (rightShoulder, leftShoulder) => {
+  // if (rightShoulder.x < 400) {
+  if (rightShoulder.x < 400 && window.innerWidth - leftShoulder.x < 1000) {
+    return true;
+  }
+  return false;
+};
+
+const detectMovement = (currentPositions, previousPositions) => {
+  let shouldersRatio =
+    ((currentPositions[0].x - currentPositions[1].x) * 100) / window.innerWidth;
+
+  // let movementLimit = shouldersRatio > 10 ? 30 : 15;
+  let movementLimit;
+  if (shouldersRatio > 15) {
+    movementLimit = 100;
+  } else if (shouldersRatio < 15 && shouldersRatio > 5) {
+    movementLimit = 50;
+  } else if (shouldersRatio < 5) {
+    movementLimit = 3;
+  }
+
+  currentPositions.map((p, i) => {
+    if (p.x - previousPositions[i].x > Math.abs(movementLimit)) {
+      if (!isDead) {
+        dead();
+      }
+    }
+  });
+};
+
+initDetection();
+
+    </script>
+  </body>
+</html>
